@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import requests
 from bs4 import BeautifulSoup
 import os
@@ -33,6 +34,11 @@ class DLinkFirmwareScraper:
 
     def download_file(self, url: str, local_path: str) -> bool:
         """Download a single file with retry logic"""
+        # Skip if the file already exists
+        if os.path.exists(local_path):
+            print(f"⏭️ Skipping: {local_path} (already exists)")
+            return False
+    
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -135,7 +141,7 @@ class DLinkFirmwareScraper:
 if __name__ == "__main__":
     BASE_URL = "http://downloads.d-link.co.za/"
     DOWNLOAD_PATH = "dlink_firmware"
-    TARGET_MODELS = ["DAP", "DIR", "DRA"]
+    TARGET_MODELS = ["DAP", "DIR", "DRA", "E", "G", "M", "R"]
     IGNORED_EXTENSIONS = ['doc', 'pdf', 'txt', 'xls', 'docx', 'md5']
     
     scraper = DLinkFirmwareScraper(BASE_URL, DOWNLOAD_PATH, TARGET_MODELS, IGNORED_EXTENSIONS)
