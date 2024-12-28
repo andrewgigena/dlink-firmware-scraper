@@ -7,9 +7,12 @@ A Python scraper designed to download firmware files for specific D-Link models 
 
 - Scrapes D-Link firmware directories for multiple models.
 - Skips downloading unwanted file types (e.g., `.pdf`, `.txt`, `.docx`).
+- Automatic unpacking of .zip and .rar
 - Provides retry logic for downloading firmware files.
 - Supports easy configuration for model selection and file exclusion.
 - Outputs a summary of found firmware directories.
+- Files are downloaded on the background.
+- Parallel processing to speed up downloads
 
 ## Requirements
 

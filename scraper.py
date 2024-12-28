@@ -7,9 +7,12 @@ import os
 from urllib.parse import urljoin, unquote
 import time
 from typing import Set, List
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import queue
+import threading
 
 class DLinkFirmwareScraper:
-    def __init__(self, base_url: str, download_path: str, target_models: List[str], ignored_extensions: List[str]):
+    def __init__(self, base_url: str, download_path: str, target_models: List[str], ignored_extensions: List[str], max_parallel_downloads: int = 128):
         self.base_url = base_url
         self.download_path = download_path
         self.target_models = target_models
@@ -19,6 +22,10 @@ class DLinkFirmwareScraper:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
         self.firmware_paths: Set[str] = set()
+        self.max_parallel_downloads = max_parallel_downloads
+        self.executor = ThreadPoolExecutor(max_workers=self.max_parallel_downloads)
+        self.download_queue = queue.Queue()  # Queue for download tasks
+        self.queue_lock = threading.Lock()
 
     def should_download_file(self, filename: str) -> bool:
         """Check if the file should be downloaded based on its extension"""
@@ -91,6 +98,7 @@ class DLinkFirmwareScraper:
 
         # Find all submodel directories
         links = soup.find_all('a')
+        tasks = []
         for link in links:
             href = link.get('href')
             if not href or href in ['/', '../', '?C=N;O=D', '?C=M;O=A', '?C=S;O=A', '?C=D;O=A']:
@@ -98,8 +106,14 @@ class DLinkFirmwareScraper:
 
             submodel_url = urljoin(model_url, unquote(href))
             if href.endswith('/'):
-                # Process submodel directory
-                self.process_submodel_directory(submodel_url)
+                # Process submodel directory concurrently
+                submodel_name = href.strip('/')
+                print(f"👉 Queuing submodel: {submodel_name}")
+                tasks.append(self.executor.submit(self.process_submodel_directory, submodel_url))
+
+        # Wait for all submodel processing tasks to complete
+        for task in as_completed(tasks):
+            task.result()  # Ensure exceptions are raised if any
 
     def process_submodel_directory(self, submodel_url: str):
         """Process a submodel directory to find firmware folders"""
@@ -115,7 +129,6 @@ class DLinkFirmwareScraper:
 
             if href.lower() in ['firmware/', 'Firmware/']:
                 firmware_url = urljoin(submodel_url, unquote(href))
-                print(f"📁 Found firmware directory: {firmware_url}")
                 self.firmware_paths.add(firmware_url)
                 self.process_firmware_directory(firmware_url)
 
@@ -132,8 +145,6 @@ class DLinkFirmwareScraper:
         links = soup.find_all('a')
         
         for link in links:
-            
-
             href = link.get('href')
             if not href or href in ['/', '../', '?C=N;O=D', '?C=M;O=A', '?C=S;O=A', '?C=D;O=A']:
                 continue
@@ -146,7 +157,6 @@ class DLinkFirmwareScraper:
             
             if href.endswith('/'):
                 # It's a subdirectory - process it recursively
-                print(f"📂 Found subdirectory: {full_url}")
                 self.process_firmware_directory(full_url, depth + 1, max_depth)
             else:
                 # It's a file - check if we should download it
@@ -160,7 +170,33 @@ class DLinkFirmwareScraper:
                 # Create any missing directories and subdirectories
                 os.makedirs(os.path.dirname(local_path), exist_ok=True)
 
-                self.download_file(full_url, local_path)
+                # Add the download task to the queue
+                self.download_queue.put((full_url, local_path))
+
+        # Start worker threads to process the queue
+        self.start_download_workers()
+
+    def start_download_workers(self):
+        """Start worker threads to process the download queue"""
+        def worker():
+            while True:
+                try:
+                    url, local_path = self.download_queue.get(timeout=5)  # Wait for tasks with a timeout
+                    self.download_file(url, local_path)
+                    self.download_queue.task_done()
+                except queue.Empty:
+                    break
+
+        # Start multiple threads to download files concurrently
+        threads = []
+        for _ in range(self.max_parallel_downloads):
+            thread = threading.Thread(target=worker)
+            thread.start()
+            threads.append(thread)
+
+        # Wait for all threads to finish
+        for thread in threads:
+            thread.join()
 
     def run(self):
         """Main execution method"""
@@ -173,10 +209,18 @@ class DLinkFirmwareScraper:
 
         os.makedirs(self.download_path, exist_ok=True)
 
+        tasks = []
         for model in self.target_models:
             model_url = urljoin(self.base_url, f"{model}/")
-            print(f"\n👉 Processing model: {model}")
-            self.process_model_directory(model_url)
+            print(f"👉 Queuing model: {model}")
+            tasks.append(self.executor.submit(self.process_model_directory, model_url))
+
+        # Wait for all model processing tasks to complete
+        for task in as_completed(tasks):
+            task.result()  # Ensure exceptions are raised if any
+
+        # Wait for all download tasks to finish
+        self.download_queue.join()
 
         print("\n=== Summary ===")
         print(f"Found {len(self.firmware_paths)} firmware directories:")
