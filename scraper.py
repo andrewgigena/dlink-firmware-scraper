@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import hashlib
 import zipfile
 import rarfile
 import requests
@@ -26,6 +27,8 @@ class DLinkFirmwareScraper:
         self.executor = ThreadPoolExecutor(max_workers=self.max_parallel_downloads)
         self.download_queue = queue.Queue()  # Queue for download tasks
         self.queue_lock = threading.Lock()
+        self.cache_dir = os.path.join(download_path, '.cache')
+        os.makedirs(self.cache_dir, exist_ok=True)
 
     def should_download_file(self, filename: str) -> bool:
         """Check if the file should be downloaded based on its extension"""
@@ -33,19 +36,31 @@ class DLinkFirmwareScraper:
         return file_extension not in self.ignored_extensions
 
     def get_soup(self, url: str) -> BeautifulSoup:
-        try:
-            response = self.session.get(url, timeout=30)
-            response.raise_for_status()
-            return BeautifulSoup(response.content, 'html.parser')
-        except requests.RequestException as e:
-            print(f"Error accessing {url}: {str(e)}")
-            return None
+        cache_file = os.path.join(self.cache_dir, self._get_cache_file_name(url))
+        if os.path.exists(cache_file):
+            with open(cache_file, 'r') as f:
+                html_content = f.read()
+        else:
+            try:
+                response = self.session.get(url, timeout=30)
+                response.raise_for_status()
+                html_content = response.content
+                with open(cache_file, 'wb') as f:
+                    f.write(html_content)
+            except requests.RequestException as e:
+                print(f"Error accessing {url}: {str(e)}")
+                return None
+
+        return BeautifulSoup(html_content, 'html.parser')
+
+    def _get_cache_file_name(self, url: str) -> str:
+        return hashlib.sha256(url.encode()).hexdigest() + '.html'
 
     def download_file(self, url: str, local_path: str) -> bool:
         """Download a single file with retry logic"""
         # Skip if the file already exists
         if os.path.exists(local_path):
-            print(f"⏭️ Skipping: {local_path} (already exists)")
+            print(f"⏭️ Skipping (already exists): {local_path}")
             return False
     
         max_retries = 3
@@ -161,7 +176,7 @@ class DLinkFirmwareScraper:
             else:
                 # It's a file - check if we should download it
                 if not self.should_download_file(href):
-                    print(f"⏭️ Skipping ignored file type: {href}")
+                    print(f"⏭️ Skipping (ignored): {href}")
                     continue
                 
                 relative_path = full_url.replace(self.base_url, '').strip('/')
