@@ -148,6 +148,17 @@ files = [
 all = ["flake8 (>=7.1.1)", "mypy (>=1.11.2)", "pytest (>=8.3.2)", "ruff (>=0.6.2)"]
 
 [[package]]
+name = "rarfile"
+version = "4.2"
+description = "RAR archive reader for Python"
+optional = false
+python-versions = ">=3.6"
+files = [
+    {file = "rarfile-4.2-py3-none-any.whl", hash = "sha256:8757e1e3757e32962e229cab2432efc1f15f210823cc96ccba0f6a39d17370c9"},
+    {file = "rarfile-4.2.tar.gz", hash = "sha256:8e1c8e72d0845ad2b32a47ab11a719bc2e41165ec101fd4d3fe9e92aa3f469ef"},
+]
+
+[[package]]
 name = "requests"
 version = "2.32.3"
 description = "Python HTTP for Humans."
@@ -199,4 +210,4 @@ zstd = ["zstandard (>=0.18.0)"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.12"
-content-hash = "78a1f70543d6f2e3e74d1a48a639e48dc593fbe95b9607b3ff2d8c2c7003bb9e"
+content-hash = "44156b1a9d55437c4c4793d22d1c8da1a4bb1569d9847935966edf2a19328de2"

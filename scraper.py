@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import zipfile
+import rarfile
 import requests
 from bs4 import BeautifulSoup
 import os
@@ -51,6 +53,11 @@ class DLinkFirmwareScraper:
                     for chunk in response.iter_content(chunk_size=8192):
                         if chunk:
                             f.write(chunk)
+
+                # Try to unpack zip and rar files
+                if local_path.endswith(('.zip', '.rar')):
+                    self.unpack_file(local_path)
+
                 print(f"✅ Downloaded: {local_path}")
                 return True
             except Exception as e:
@@ -58,6 +65,23 @@ class DLinkFirmwareScraper:
                 if attempt == max_retries - 1:
                     return False
                 time.sleep(2 ** attempt)
+
+    def unpack_file(self, file_path: str) -> None:
+        """Unpack zip and rar files"""
+        if file_path.endswith('.zip'):
+            try:
+                with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                    zip_ref.extractall(os.path.dirname(file_path))
+                print(f"✅ Unpacked: {file_path}")
+            except zipfile.BadZipFile:
+                print(f"❌ Failed to unpack: {file_path} (invalid zip file)")
+        elif file_path.endswith('.rar'):
+            try:
+                with rarfile.RarFile(file_path, 'r') as rar_ref:
+                    rar_ref.extractall(os.path.dirname(file_path))
+                print(f"✅ Unpacked: {file_path}")
+            except rarfile.BadRarFile:
+                print(f"❌ Failed to unpack: {file_path} (invalid rar file)")
 
     def process_model_directory(self, model_url: str):
         """Process a specific model directory"""
@@ -93,29 +117,50 @@ class DLinkFirmwareScraper:
                 firmware_url = urljoin(submodel_url, unquote(href))
                 print(f"📁 Found firmware directory: {firmware_url}")
                 self.firmware_paths.add(firmware_url)
-                self.download_firmware_files(firmware_url)
+                self.process_firmware_directory(firmware_url)
 
-    def download_firmware_files(self, firmware_url: str):
-        """Download all files from a firmware directory"""
-        soup = self.get_soup(firmware_url)
+    def process_firmware_directory(self, directory_url: str, depth: int = 0, max_depth: int = 5):
+        """Recursively process a directory to find and download firmware files"""
+        if depth > max_depth:
+            print(f"⚠️ Maximum depth reached at {directory_url}")
+            return
+
+        soup = self.get_soup(directory_url)
         if not soup:
             return
 
         links = soup.find_all('a')
+        
         for link in links:
+            
+
             href = link.get('href')
             if not href or href in ['/', '../', '?C=N;O=D', '?C=M;O=A', '?C=S;O=A', '?C=D;O=A']:
                 continue
 
-            if not href.endswith('/'):  # It's a file
+            # Avoid processing parent directories (infinitely recursive)
+            if "Parent Directory" in link:
+                continue
+
+            full_url = urljoin(directory_url, unquote(href))
+            
+            if href.endswith('/'):
+                # It's a subdirectory - process it recursively
+                print(f"📂 Found subdirectory: {full_url}")
+                self.process_firmware_directory(full_url, depth + 1, max_depth)
+            else:
+                # It's a file - check if we should download it
                 if not self.should_download_file(href):
                     print(f"⏭️ Skipping ignored file type: {href}")
                     continue
-                    
-                file_url = urljoin(firmware_url, unquote(href))
-                relative_path = file_url.replace(self.base_url, '').strip('/')
+                
+                relative_path = full_url.replace(self.base_url, '').strip('/')
                 local_path = os.path.join(self.download_path, relative_path)
-                self.download_file(file_url, local_path)
+
+                # Create any missing directories and subdirectories
+                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+
+                self.download_file(full_url, local_path)
 
     def run(self):
         """Main execution method"""
